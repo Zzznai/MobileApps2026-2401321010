@@ -20,14 +20,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val releaseKeystore: String? = System.getenv("PLANTCARE_KEYSTORE")
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("PLANTCARE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("PLANTCARE_KEY_ALIAS") ?: "plantcare"
+                keyPassword = System.getenv("PLANTCARE_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             enableUnitTestCoverage = true
         }
         release {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             optimization {
-                enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
+                enable = false
             }
         }
     }
