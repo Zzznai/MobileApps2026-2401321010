@@ -13,12 +13,11 @@ import com.naim.plantcare.data.dao.SpeciesDao
 import com.naim.plantcare.data.entity.Plant
 import com.naim.plantcare.data.entity.PlantCategory
 import com.naim.plantcare.data.entity.PlantSpecies
-import java.time.LocalDate
 
 @Database(
     entities = [Plant::class, PlantCategory::class, PlantSpecies::class],
     version = 4,
-    exportSchema = false
+    exportSchema = false,
 )
 @TypeConverters(Converters::class)
 abstract class PlantCareDatabase : RoomDatabase() {
@@ -54,7 +53,7 @@ abstract class PlantCareDatabase : RoomDatabase() {
             PRESET_CATEGORIES.forEach { category ->
                 db.execSQL(
                     "INSERT INTO plants_cat (name, latinName, wateringIntervalDays) VALUES (?, ?, ?)",
-                    arrayOf(category.name, category.latinName, category.wateringIntervalDays)
+                    arrayOf(category.name, category.latinName, category.wateringIntervalDays),
                 )
             }
             val species = context.assets.open(SpeciesCsvParser.ASSET_FILE).bufferedReader().useLines {
@@ -75,21 +74,8 @@ abstract class PlantCareDatabase : RoomDatabase() {
                         item.waterAutumnDays,
                         item.waterWinterDays,
                         item.difficulty.name,
-                        if (item.toxicToPets) 1 else 0
-                    )
-                )
-            }
-            samplePlants(LocalDate.now()).forEach { plant ->
-                db.execSQL(
-                    "INSERT INTO plants (name, species, lastWatered, categoryId, speciesId) " +
-                        "VALUES (?, ?, ?, ?, (SELECT id FROM plant_species WHERE latinName = ?))",
-                    arrayOf(
-                        plant.name,
-                        plant.species,
-                        plant.lastWatered.toEpochDay(),
-                        plant.categoryId,
-                        plant.species
-                    )
+                        if (item.toxicToPets) 1 else 0,
+                    ),
                 )
             }
         }
@@ -97,7 +83,7 @@ abstract class PlantCareDatabase : RoomDatabase() {
 
     companion object {
         @Volatile
-        private var INSTANCE: PlantCareDatabase? = null
+        private var instance: PlantCareDatabase? = null
 
         val PRESET_CATEGORIES = listOf(
             PlantCategory(name = "Ароидни", latinName = "Araceae", wateringIntervalDays = 7),
@@ -144,7 +130,7 @@ abstract class PlantCareDatabase : RoomDatabase() {
             PlantCategory(name = "Птерисови", latinName = "Pteridaceae", wateringIntervalDays = 3),
             PlantCategory(name = "Асплениеви", latinName = "Aspleniaceae", wateringIntervalDays = 5),
             PlantCategory(name = "Многоножкови", latinName = "Polypodiaceae", wateringIntervalDays = 6),
-            PlantCategory(name = "Давалиеви", latinName = "Davalliaceae", wateringIntervalDays = 4)
+            PlantCategory(name = "Давалиеви", latinName = "Davalliaceae", wateringIntervalDays = 4),
         )
 
         fun familyId(latinName: String): Long {
@@ -153,35 +139,23 @@ abstract class PlantCareDatabase : RoomDatabase() {
             return index + 1L
         }
 
-        fun samplePlants(today: LocalDate): List<Plant> = listOf(
-            samplePlant("Фикус", "Ficus elastica", "Moraceae", today.minusDays(3)),
-            samplePlant("Монстера", "Monstera deliciosa", "Araceae", today.minusDays(5)),
-            samplePlant("Кактус", "Echinopsis", "Cactaceae", today.minusDays(2)),
-            samplePlant("Орхидея", "Phalaenopsis", "Orchidaceae", today.minusDays(9)),
-            samplePlant("Босилек", "Ocimum basilicum", "Lamiaceae", today.minusDays(1))
-        )
-
-        private fun samplePlant(name: String, species: String, family: String, lastWatered: LocalDate) =
-            Plant(name = name, species = species, lastWatered = lastWatered, categoryId = familyId(family))
-
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE plants ADD COLUMN photoPath TEXT")
             }
         }
 
-        fun getInstance(context: Context): PlantCareDatabase =
-            INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
-                    context.applicationContext,
-                    PlantCareDatabase::class.java,
-                    "plantcare.db"
-                )
-                    .addCallback(PrepopulateCallback(context.applicationContext))
-                    .addMigrations(MIGRATION_3_4)
-                    .fallbackToDestructiveMigrationFrom(true, 1, 2)
-                    .build()
-                    .also { INSTANCE = it }
-            }
+        fun getInstance(context: Context): PlantCareDatabase = instance ?: synchronized(this) {
+            instance ?: Room.databaseBuilder(
+                context.applicationContext,
+                PlantCareDatabase::class.java,
+                "plantcare.db",
+            )
+                .addCallback(PrepopulateCallback(context.applicationContext))
+                .addMigrations(MIGRATION_3_4)
+                .fallbackToDestructiveMigrationFrom(true, 1, 2)
+                .build()
+                .also { instance = it }
+        }
     }
 }

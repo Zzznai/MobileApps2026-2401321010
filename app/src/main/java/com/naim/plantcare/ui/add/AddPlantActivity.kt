@@ -2,6 +2,7 @@ package com.naim.plantcare.ui.add
 
 import android.content.ActivityNotFoundException
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.AutoCompleteTextView
 import android.widget.Toast
@@ -20,11 +21,9 @@ import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.imageview.ShapeableImageView
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import com.naim.plantcare.PlantCareApp
 import com.naim.plantcare.R
-import com.naim.plantcare.data.PhotoStorage
-import com.naim.plantcare.data.PlantCareDatabase
 import com.naim.plantcare.data.entity.PlantSpecies
-import com.naim.plantcare.data.repository.PlantRepository
 import com.naim.plantcare.logic.Season
 import com.naim.plantcare.ui.PlantPhoto
 import com.naim.plantcare.validation.Validatable
@@ -34,20 +33,23 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
-class AddPlantActivity : AppCompatActivity(), Validatable {
+class AddPlantActivity :
+    AppCompatActivity(),
+    Validatable {
     companion object {
         const val EXTRA_PLANT_ID = "com.naim.plantcare.EXTRA_EDIT_PLANT_ID"
 
         private val DATE_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy")
+        private const val LOG_TAG = "AddPlantActivity"
         private const val DATE_PICKER_TAG = "last_watered_picker"
         private const val KEY_PENDING_CAMERA = "pending_camera_path"
     }
 
-    private val photoStorage by lazy { PhotoStorage(applicationContext) }
+    private val container by lazy { (application as PlantCareApp).container }
+    private val photoStorage by lazy { container.photoStorage }
 
     private val viewModel: AddPlantViewModel by viewModels {
-        val db = PlantCareDatabase.getInstance(applicationContext)
-        AddPlantViewModel.Factory(PlantRepository(db.plantDao(), db.categoryDao(), db.speciesDao()), photoStorage)
+        AddPlantViewModel.Factory(container.plantRepository, photoStorage)
     }
 
     private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
@@ -93,36 +95,14 @@ class AddPlantActivity : AppCompatActivity(), Validatable {
         ivPhoto = findViewById(R.id.ivPhoto)
         btnRemovePhoto = findViewById(R.id.btnRemovePhoto)
 
-        if (viewModel.pendingCameraPath == null) {
-            viewModel.pendingCameraPath = savedInstanceState?.getString(KEY_PENDING_CAMERA)
-        }
-        findViewById<MaterialButton>(R.id.btnTakePhoto).setOnClickListener { takePhoto() }
-        findViewById<MaterialButton>(R.id.btnPickPhoto).setOnClickListener {
-            pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-        }
-        btnRemovePhoto.setOnClickListener { viewModel.removePhoto() }
-        viewModel.photoPath.observe(this) { path ->
-            PlantPhoto.showInForm(ivPhoto, path)
-            btnRemovePhoto.visibility = if (path == null) View.GONE else View.VISIBLE
-        }
+        setUpPhoto(savedInstanceState)
 
         val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
         toolbar.setNavigationOnClickListener { finish() }
         val btnSave = findViewById<MaterialButton>(R.id.btnSave)
 
         val editId = intent.getLongExtra(EXTRA_PLANT_ID, -1L)
-        if (editId != -1L) {
-            toolbar.setTitle(R.string.title_edit_plant)
-            btnSave.setText(R.string.btn_save_changes)
-            viewModel.plantToEdit(editId).observe(this) { details ->
-                if (details != null && viewModel.startEditing(details.plant)) {
-                    etName.setText(details.plant.name)
-                    details.species?.let { actvSpecies.setText(AddPlantViewModel.speciesLabel(it), false) }
-                    etCustomDays.setText(details.plant.customWateringDays?.toString().orEmpty())
-                    showSpeciesHint()
-                }
-            }
-        }
+        if (editId != -1L) loadPlantForEditing(editId, toolbar, btnSave)
 
         viewModel.species.observe(this) { list ->
             actvSpecies.setAdapter(SpeciesAdapter(this, list.map(AddPlantViewModel::speciesLabel)))
@@ -152,6 +132,34 @@ class AddPlantActivity : AppCompatActivity(), Validatable {
         btnSave.setOnClickListener { savePlant() }
     }
 
+    private fun setUpPhoto(savedInstanceState: Bundle?) {
+        if (viewModel.pendingCameraPath == null) {
+            viewModel.pendingCameraPath = savedInstanceState?.getString(KEY_PENDING_CAMERA)
+        }
+        findViewById<MaterialButton>(R.id.btnTakePhoto).setOnClickListener { takePhoto() }
+        findViewById<MaterialButton>(R.id.btnPickPhoto).setOnClickListener {
+            pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
+        btnRemovePhoto.setOnClickListener { viewModel.removePhoto() }
+        viewModel.photoPath.observe(this) { path ->
+            PlantPhoto.showInForm(ivPhoto, path)
+            btnRemovePhoto.visibility = if (path == null) View.GONE else View.VISIBLE
+        }
+    }
+
+    private fun loadPlantForEditing(editId: Long, toolbar: MaterialToolbar, btnSave: MaterialButton) {
+        toolbar.setTitle(R.string.title_edit_plant)
+        btnSave.setText(R.string.btn_save_changes)
+        viewModel.plantToEdit(editId).observe(this) { details ->
+            if (details != null && viewModel.startEditing(details.plant)) {
+                etName.setText(details.plant.name)
+                details.species?.let { actvSpecies.setText(AddPlantViewModel.speciesLabel(it), false) }
+                etCustomDays.setText(details.plant.customWateringDays?.toString().orEmpty())
+                showSpeciesHint()
+            }
+        }
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PENDING_CAMERA, viewModel.pendingCameraPath)
@@ -162,6 +170,7 @@ class AddPlantActivity : AppCompatActivity(), Validatable {
         try {
             takePicture.launch(photoStorage.uriFor(file))
         } catch (e: ActivityNotFoundException) {
+            Log.w(LOG_TAG, "No camera app to take the photo", e)
             viewModel.onCameraResult(false)
             Toast.makeText(this, R.string.no_camera_app, Toast.LENGTH_SHORT).show()
         }
@@ -172,14 +181,14 @@ class AddPlantActivity : AppCompatActivity(), Validatable {
             layout = tilName,
             regex = Validatable.PLANT_NAME_REGEX,
             errorMessage = getString(R.string.error_plant_name),
-            allowEmpty = false
+            allowEmpty = false,
         ),
         ValidationRule(
             layout = tilCustomDays,
             regex = Validatable.WATERING_DAYS_REGEX,
             errorMessage = getString(R.string.error_watering_days),
-            allowEmpty = true
-        )
+            allowEmpty = true,
+        ),
     )
 
     private fun selectedSpecies(): PlantSpecies? = viewModel.findSpecies(actvSpecies.text?.toString().orEmpty())
@@ -193,7 +202,7 @@ class AddPlantActivity : AppCompatActivity(), Validatable {
                 R.string.species_hint,
                 getString(it.light.label),
                 getString(season.label),
-                resources.getQuantityString(R.plurals.every_n_days, days, days)
+                resources.getQuantityString(R.plurals.every_n_days, days, days),
             )
         }
     }
@@ -205,7 +214,7 @@ class AddPlantActivity : AppCompatActivity(), Validatable {
             .setTitleText(R.string.hint_last_watered)
             .setSelection(selected.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
             .setCalendarConstraints(
-                CalendarConstraints.Builder().setValidator(DateValidatorPointBackward.now()).build()
+                CalendarConstraints.Builder().setValidator(DateValidatorPointBackward.now()).build(),
             )
             .build()
         picker.addOnPositiveButtonClickListener { millis ->
