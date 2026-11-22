@@ -183,7 +183,7 @@ com.naim.plantcare
 
 1. Клонирайте хранилището:
    ```bash
-   git clone https://github.com/Zzznai/MobileApps2025-2401321010.git
+   git clone https://github.com/Zzznai/MobileApps2026-2401321010.git
    ```
 2. **File → Open** и изберете папката на проекта. Изчакайте Gradle Sync да приключи.
 3. Изберете устройство и натиснете **Run** (конфигурация `app`).
